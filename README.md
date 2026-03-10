@@ -14,149 +14,51 @@
   />
 </p>
 
-> **Send crypto to `@username` on Stellar**
+> Send crypto to `@username` instead of a long wallet address — built for Stellar.
 
-Alien Gateway is a **Stellar Naming Service ** — a decentralized, privacy-preserving username system for crypto payments on **Stellar**.
+Alien Gateway is a **privacy-preserving username system for the Stellar network**.  
+It allows users to send and receive payments using **human-readable identities** like `@username` instead of long Stellar wallet addresses.
 
----
-
-## What It Does
-
-* Maps `@username → wallet address`
-* Enables payments using human-readable names
-* Works natively with Stellar payments and memos
-* Prevents wrong-address transfers
-* Preserves user privacy using ZK proofs
+Unlike traditional naming systems, usernames are **never stored on-chain in plaintext**.  
+They are stored as **zero-knowledge commitments**, protecting user identity and wallet associations.
 
 ---
 
-## Why gateway
+## ✨ Features
 
-* Wallet addresses are long and error-prone
-* Users manage multiple wallets across chains
-* Public name registries leak identity data
-
-SNS treats **usernames as a core payment primitive**, not just metadata.
-
----
-
-## How It Works 
-
-1. User registers `@username`
-2. Username is stored as a **ZK commitment**, not plaintext
-3. Availability is proven using **Circom ZK proofs**
-4. Username resolves to a wallet at payment time
-5. Stellar transaction is routed with memo support
+- Send payments using `@username`
+- Human-readable Stellar identities
+- Privacy-preserving wallet linking
+- Optional private payment routing
+- Developer-friendly SDK for integration
 
 ---
 
-## Zero-Knowledge Design
+## 🧠 How It Works
 
-* Usernames are **never stored on-chain in plaintext**
-* Existence / non-existence is proven via ZK
-* Registry is backed by a Sparse Merkle Tree
-* Only a single Merkle root is anchored on-chain
-
----
-
-## Core Components
-
-* **username Registry (Soroban)**
-
-  * Stores commitments
-  * Anchors Merkle root
-
-* **ZK Verifier**
-
-  * Verifies Circom proofs
-
-* **Wallet Resolver**
-
-  * Maps username → wallet
-  * Supports exchange memos
+1. User registers a `@username`
+2. Username is stored as a **ZK commitment**
+3. The system verifies uniqueness using **zero-knowledge proofs**
+4. The username resolves to a linked **Stellar wallet**
+5. Payments can be sent directly using `@username`
 
 ---
 
-## Use Cases
+## ⚙️ Tech Stack
 
-* Wallet payments
-* Exchange deposits
-* DAO payouts
-* Creator tipping
-* Cross-border transfers
-
----
-
-## Vision
-
-**One username. One identity. Stellar-native.**
-
-Alien Gateway aims to be the **identity and payment resolution layer** for the Stellar ecosystem.
+- **Smart Contracts:** Rust + Soroban  
+- **ZK Circuits:** Circom  
+- **Proof System:** Groth16  
+- **Hash Function:** Poseidon  
+- **SDK:** TypeScript  
 
 ---
 
-## Development
+## 🚀 Vision
 
-### Building the Smart Contract
+**One username. One identity. Built for Stellar.**
 
-```bash
-cd gateway-contract
-stellar contract build
-```
-
-### Running Contract Tests
-
-
-```bash
-cd gateway-contract
-cargo test
-```
-
-### End-to-End Integration Test: Register → Resolve
-
-This project includes a full integration test that simulates the complete user journey:
-
-- Generates a ZK proof off-chain (see `zk/scripts/prove_username_exists.js`)
-- Submits a registration to the Soroban contract
-- Resolves the username back to a wallet address
-
-**How to run the E2E test:**
-
-```bash
-cd gateway-contract
-cargo test --test test_register_resolve_e2e
-```
-
-This test is run automatically in CI on every PR. It is the primary health check for the system, ensuring both the ZK and contract layers work together.
-
-### Compiling ZK Circuits
-
-```bash
-cd zk
-npm install
-
-# Compile working circuit
-npm run compile:hello
-
-# Other circuits available (may need fixes):
-# npm run compile:username_hash
-# npm run compile:merkle_path
-# npm run compile:merkle_inclusion
-# npm run compile:merkle_update
-# npm run compile:username_merkle
-```
-
-> **Note**: Some circuits require structural fixes (missing `component main`, include paths). The CI currently validates basic circuit compilation with `hello.circom`.
-
-### CI/CD Pipeline
-
-The project uses GitHub Actions for continuous integration:
-
-- **Smart Contracts CI**: Builds the Soroban contract to WASM and runs all Rust tests
-- **Checks**: Runs code formatting (rustfmt) and linting (clippy) checks
-- **ZK Circuits CI**: Compiles all Circom circuits to ensure they build without errors
-
-All checks must pass before PRs can be merged.
+Alien Gateway aims to become the **identity and payment resolution layer for the Stellar ecosystem**.
 
 ---
 
