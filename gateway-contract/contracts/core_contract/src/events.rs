@@ -10,6 +10,7 @@ pub struct MerkleRootUpdated {
     pub old_root: BytesN<32>,
     pub new_root: BytesN<32>,
 }
+#![allow(dead_code)]
 
 use soroban_sdk::{symbol_short, Symbol};
 

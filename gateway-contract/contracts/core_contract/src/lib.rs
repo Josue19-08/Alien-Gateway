@@ -13,6 +13,11 @@ use soroban_sdk::{contract, contractclient, contractimpl, panic_with_error, Addr
 pub use crate::errors::ContractError;
 pub use crate::events::{MerkleRootUpdated, UsernameRegistered};
 pub use crate::types::{Proof, PublicSignals};
+pub mod events;
+
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, BytesN, Env,
+};
 
 #[contract]
 pub struct CoreContract;
