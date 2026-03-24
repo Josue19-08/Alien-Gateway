@@ -20,4 +20,8 @@ pub enum EscrowError {
     PaymentAlreadyExecuted = 8,
     /// The scheduled payment is not yet due for execution.
     PaymentNotYetDue = 9,
+    /// The interval must be strictly greater than 0.
+    InvalidInterval = 10,
+    /// The auto-pay counter has reached its maximum value (u32::MAX), preventing new IDs.
+    AutoPayCounterOverflow = 11,
 }
