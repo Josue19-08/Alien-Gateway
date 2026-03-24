@@ -6,12 +6,13 @@
   "scripts": {
   "test": "node tests/test_update_proof.js",
   "test:update_proof": "node tests/test_update_proof.js",
+  "test:username_leaf": "ts-node tests/username_leaf_test.ts",
 
   "setup": "cd scripts && chmod +x trusted-setup.sh && ./trusted-setup.sh",
 
   "compile": "cd scripts && chmod +x compile.sh && ./compile.sh",
 
-  "compile:all": "npm run compile:merkle_inclusion && npm run compile:merkle_update && npm run compile:merkle_update_proof && npm run compile:username_merkle",
+  "compile:all": "npm run compile:merkle_inclusion && npm run compile:merkle_update && npm run compile:merkle_update_proof && npm run compile:username_merkle && npm run compile:username_leaf",
 
   "compile:merkle_inclusion": "mkdir -p build/merkle_inclusion/wasm && circom circuits/merkle/merkle_inclusion.circom --r1cs --sym -o build/merkle_inclusion -l node_modules && circom circuits/merkle/merkle_inclusion.circom --wasm -o build/merkle_inclusion/wasm -l node_modules",
 
@@ -19,7 +20,9 @@
 
   "compile:merkle_update_proof": "mkdir -p build/merkle_update_proof/wasm && circom circuits/merkle/merkle_update_proof.circom --r1cs --sym -o build/merkle_update_proof -l node_modules && circom circuits/merkle/merkle_update_proof.circom --wasm -o build/merkle_update_proof/wasm -l node_modules",
 
-  "compile:username_merkle": "mkdir -p build/username_merkle/wasm && circom circuits/username_merkle.circom --r1cs --sym -o build/username_merkle -l node_modules && circom circuits/username_merkle.circom --wasm -o build/username_merkle/wasm -l node_modules"
+  "compile:username_merkle": "mkdir -p build/username_merkle/wasm && circom circuits/username_merkle.circom --r1cs --sym -o build/username_merkle -l node_modules && circom circuits/username_merkle.circom --wasm -o build/username_merkle/wasm -l node_modules",
+
+  "compile:username_leaf": "mkdir -p build/username_leaf_main/wasm && circom circuits/merkle/username_leaf_main.circom --r1cs --sym -o build/username_leaf_main -l node_modules && circom circuits/merkle/username_leaf_main.circom --wasm -o build/username_leaf_main/wasm -l node_modules"
 
   
 },
