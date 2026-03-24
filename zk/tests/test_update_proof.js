@@ -107,7 +107,7 @@ async function runTests() {
     };
 
     // ── Test 1: valid insert ──────────────────────────────────────────────────
-    console.log("\n── Test 1: valid insert proof ──────────────────────────────");
+    process.stdout.write("\n── Test 1: valid insert proof ──────────────────────────────\n");
     {
         const { proof, publicSignals } = await snarkjs.groth16.fullProve(
             input,
@@ -119,18 +119,18 @@ async function runTests() {
         const valid = await snarkjs.groth16.verify(vKey, publicSignals, proof);
 
         assert.ok(valid, "Proof should be valid for a correct insert");
-        console.log("  ✔  proof generated and verified");
-        console.log(`  ✔  out_newRoot = ${publicSignals[0]}`);
+        process.stdout.write("  ✔  proof generated and verified\n");
+        process.stdout.write(`  ✔  out_newRoot = ${publicSignals[0]}\n`);
         assert.strictEqual(
             publicSignals[0],
             newRoot.toString(),
             "out_newRoot public signal must equal newRoot"
         );
-        console.log("  ✔  out_newRoot matches expected newRoot");
+        process.stdout.write("  ✔  out_newRoot matches expected newRoot\n");
     }
 
     // ── Test 2: tampered newRoot → witness generation must fail ──────────────
-    console.log("\n── Test 2: tampered newRoot rejected ───────────────────────");
+    process.stdout.write("\n── Test 2: tampered newRoot rejected ───────────────────────\n");
     {
         const badInput = { ...input, newRoot: (newRoot + BigInt(1)).toString() };
         let threw = false;
@@ -140,11 +140,11 @@ async function runTests() {
             threw = true;
         }
         assert.ok(threw, "Witness generation should fail for a tampered newRoot");
-        console.log("  ✔  tampered newRoot correctly rejected");
+        process.stdout.write("  ✔  tampered newRoot correctly rejected\n");
     }
 
     // ── Test 3: tampered oldRoot → witness generation must fail ──────────────
-    console.log("\n── Test 3: tampered oldRoot rejected ───────────────────────");
+    process.stdout.write("\n── Test 3: tampered oldRoot rejected ───────────────────────\n");
     {
         const badInput = { ...input, oldRoot: (oldRoot + BigInt(1)).toString() };
         let threw = false;
@@ -154,13 +154,13 @@ async function runTests() {
             threw = true;
         }
         assert.ok(threw, "Witness generation should fail for a tampered oldRoot");
-        console.log("  ✔  tampered oldRoot correctly rejected");
+        process.stdout.write("  ✔  tampered oldRoot correctly rejected\n");
     }
 
-    console.log("\n══ All tests passed ══\n");
+    process.stdout.write("\n══ All tests passed ══\n\n");
 }
 
 runTests().catch(err => {
-    console.error("\n✘  Test failed:", err.message ?? err);
+    process.stderr.write(`\n✘  Test failed: ${err.message ?? err}\n`);
     process.exit(1);
 });
