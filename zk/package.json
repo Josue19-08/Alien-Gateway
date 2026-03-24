@@ -17,7 +17,7 @@
 
   "compile:merkle_update": "mkdir -p build/merkle_update/wasm && circom circuits/merkle_update.circom --r1cs --sym -o build/merkle_update -l node_modules && circom circuits/merkle_update.circom --wasm -o build/merkle_update/wasm -l node_modules",
 
-  "compile:merkle_update_proof": "mkdir -p build/merkle_update_proof/wasm && circom circuits/merkle/update_proof.circom --r1cs --sym -o build/merkle_update_proof -l node_modules && circom circuits/merkle/update_proof.circom --wasm -o build/merkle_update_proof/wasm -l node_modules",
+  "compile:merkle_update_proof": "mkdir -p build/merkle_update_proof/wasm && circom circuits/merkle/merkle_update_proof.circom --r1cs --sym -o build/merkle_update_proof -l node_modules && circom circuits/merkle/merkle_update_proof.circom --wasm -o build/merkle_update_proof/wasm -l node_modules",
 
   "compile:username_merkle": "mkdir -p build/username_merkle/wasm && circom circuits/username_merkle.circom --r1cs --sym -o build/username_merkle -l node_modules && circom circuits/username_merkle.circom --wasm -o build/username_merkle/wasm -l node_modules"
 

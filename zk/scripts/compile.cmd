@@ -25,7 +25,7 @@ if errorlevel 1 goto :error
 call :compile_circuit "merkle_update" "merkle_update.circom"
 if errorlevel 1 goto :error
 
-call :compile_circuit "merkle_update_proof" "merkle\update_proof.circom"
+call :compile_circuit "merkle_update_proof" "merkle\merkle_update_proof.circom"
 if errorlevel 1 goto :error
 
 call :compile_circuit "username_merkle" "username_merkle.circom"
