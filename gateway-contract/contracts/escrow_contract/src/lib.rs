@@ -13,8 +13,11 @@ mod test;
 
 use crate::errors::EscrowError;
 use crate::events::Events;
-use crate::storage::{increment_payment_id, read_vault, write_scheduled_payment, write_vault};
-use crate::types::{DataKey, ScheduledPayment};
+use crate::storage::{
+    increment_auto_pay_id, increment_payment_id, read_vault, write_auto_pay,
+    write_scheduled_payment, write_vault,
+};
+use crate::types::{AutoPay, DataKey, ScheduledPayment};
 use soroban_sdk::{contract, contractimpl, panic_with_error, token, Address, BytesN, Env};
 
 #[contract]
@@ -125,6 +128,68 @@ impl EscrowContract {
         write_scheduled_payment(&env, payment_id, &payment);
 
         Events::pay_exec(&env, payment_id, payment.from, payment.to, payment.amount);
+    }
+
+    /// Registers a recurring payment rule.
+    ///
+    /// Once registered, calling `trigger_auto_pay` will send `amount` tokens
+    /// every `interval` seconds from the sender's vault to the recipient's resolved address.
+    ///
+    /// ### Arguments
+    /// - `from`: The commitment ID of the source vault.
+    /// - `to`: The commitment ID of the destination vault.
+    /// - `amount`: The amount of tokens to send each interval. Must be > 0.
+    /// - `interval`: The interval in seconds between payments. Must be > 0.
+    ///
+    /// ### Returns
+    /// - `u32`: The unique auto_pay_id assigned to this rule.
+    ///
+    /// ### Errors
+    /// - `VaultNotFound`: If the `from` vault does not exist.
+    /// - `InvalidAmount`: If `amount <= 0`.
+    /// - `InvalidInterval`: If `interval <= 0`.
+    /// - `AutoPayCounterOverflow`: If the global ID counter overflows.
+    pub fn setup_auto_pay(
+        env: Env,
+        from: BytesN<32>,
+        to: BytesN<32>,
+        amount: i128,
+        interval: u64,
+    ) -> Result<u32, EscrowError> {
+        // 1. Validate Input
+        if amount <= 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+
+        if interval == 0 {
+            return Err(EscrowError::InvalidInterval);
+        }
+
+        // 2. Read Vault to verify it exists and get the token
+        let vault = read_vault(&env, &from).ok_or(EscrowError::VaultNotFound)?;
+
+        // 3. Authenticate caller as owner of from vault
+        // Host-level authentication. Panics with host error if unauthorized.
+        vault.owner.require_auth();
+
+        // 4. Generate AutoPay ID
+        let auto_pay_id = increment_auto_pay_id(&env)?;
+
+        // 5. Store AutoPay Rule
+        let auto_pay = AutoPay {
+            from: from.clone(),
+            to: to.clone(),
+            token: vault.token.clone(),
+            amount,
+            interval,
+            last_paid: 0,
+        };
+        write_auto_pay(&env, auto_pay_id, &auto_pay);
+
+        // 6. Emit Event
+        Events::auto_set(&env, auto_pay_id, from, to, amount, interval);
+
+        Ok(auto_pay_id)
     }
 }
 
