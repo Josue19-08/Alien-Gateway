@@ -12,7 +12,7 @@
 
   "compile": "cd scripts && chmod +x compile.sh && ./compile.sh",
 
-  "compile:all": "npm run compile:merkle_inclusion && npm run compile:merkle_update && npm run compile:merkle_update_proof && npm run compile:username_merkle",
+  "compile:all": "npm run compile:merkle_inclusion && npm run compile:merkle_update && npm run compile:merkle_update_proof && npm run compile:username_merkle && npm run compile:username_leaf",
 
   "compile:merkle_inclusion": "mkdir -p build/merkle_inclusion/wasm && circom circuits/merkle/merkle_inclusion.circom --r1cs --sym -o build/merkle_inclusion -l node_modules && circom circuits/merkle/merkle_inclusion.circom --wasm -o build/merkle_inclusion/wasm -l node_modules",
 
