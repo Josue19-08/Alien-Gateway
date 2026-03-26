@@ -11,7 +11,6 @@ async function testVerifier() {
     const proof = JSON.parse(fs.readFileSync(proofPath, 'utf-8'));
     const signals = JSON.parse(fs.readFileSync(signalsPath, 'utf-8'));
     const result = await verifyProof('non_inclusion', proof, signals);
-    // console.log('Non-inclusion proof:', result);
     assert(result.valid, 'Valid non-inclusion proof should pass');
   } else {
     console.warn('Non-inclusion proof fixture missing, skipping test.');
@@ -24,7 +23,6 @@ async function testVerifier() {
     const proof = JSON.parse(fs.readFileSync(updateProofPath, 'utf-8'));
     const signals = JSON.parse(fs.readFileSync(updateSignalsPath, 'utf-8'));
     const result = await verifyProof('update', proof, signals);
-    // console.log('Update proof:', result);
     assert(result.valid, 'Valid update proof should pass');
   } else {
     console.warn('Update proof fixture missing, skipping test.');
@@ -37,7 +35,6 @@ async function testVerifier() {
     // Tamper with the proof
     proof.pi_a[0] = '0';
     const result = await verifyProof('non_inclusion', proof, signals);
-    // console.log('Tampered non-inclusion proof:', result);
     assert(!result.valid, 'Tampered proof should fail');
   }
 }
