@@ -14,9 +14,9 @@ mod test;
 use crate::errors::EscrowError;
 use crate::events::Events;
 use crate::storage::{
-    increment_auto_pay_id, increment_payment_id, read_auto_pay, read_registration_contract,
-    read_vault_config, read_vault_state, write_auto_pay, write_registration_contract,
-    write_scheduled_payment, write_vault_config, write_vault_state,
+    increment_auto_pay_id, increment_payment_id, read_auto_pay, read_auto_pay_count,
+    read_registration_contract, read_vault_config, read_vault_state, write_auto_pay,
+    write_registration_contract, write_scheduled_payment, write_vault_config, write_vault_state,
 };
 use crate::types::{AutoPay, DataKey, ScheduledPayment, VaultConfig, VaultState};
 use soroban_sdk::{
@@ -568,21 +568,17 @@ impl EscrowContract {
         read_vault_state(&env, &commitment).map(|state| state.balance)
     }
 
-    /// Returns the auto-pay rule for a given source vault and rule ID.
+    /// Returns the total number of auto-pay rules that have been created.
     ///
-    /// This is a read-only getter with no side effects and no authentication
-    /// requirement. It performs a single O(1) persistent-storage lookup using
-    /// the composite key `(from, rule_id)`.
-    ///
-    /// ### Arguments
-    /// - `from`: The `BytesN<32>` commitment ID of the source vault that owns the rule.
-    /// - `rule_id`: The unique identifier of the auto-pay rule.
+    /// This equals the next available rule ID, so rule IDs range from `0` to
+    /// `get_auto_pay_count() - 1`. Callers can use this to enumerate all rule
+    /// IDs without guessing.
     ///
     /// ### Returns
-    /// - `Some(AutoPay)` if the rule exists (i.e. after `setup_auto_pay`).
-    /// - `None` if the rule does not exist or has been cancelled.
-    pub fn get_auto_pay(env: Env, from: BytesN<32>, rule_id: u32) -> Option<AutoPay> {
-        read_auto_pay(&env, &from, rule_id)
+    /// - `0` if no auto-pay rules have ever been registered.
+    /// - The count of rules created so far otherwise.
+    pub fn get_auto_pay_count(env: Env) -> u32 {
+        read_auto_pay_count(&env)
     }
 }
 
