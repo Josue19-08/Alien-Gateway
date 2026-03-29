@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use crate::registration::DataKey as RegistrationKey;
 use crate::smt_root::SmtRoot;
 use crate::types::{AddressMetadata, ChainType, PrivacyMode, PublicSignals};
@@ -785,6 +783,22 @@ fn test_update_smt_root_unauthorized_rejects() {
     let new_root = BytesN::from_array(&env, &[99u8; 32]);
     // Contract not initialized - no owner set, so should panic with NotFound
     client.update_smt_root(&new_root);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #11)")]
+fn test_update_smt_root_same_root_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, client) = setup(&env);
+
+    let owner = Address::generate(&env);
+    client.initialize(&owner);
+
+    let root = BytesN::from_array(&env, &[42u8; 32]);
+    client.update_smt_root(&root);
+    // Setting the same root again must fail with RootUnchanged (#11)
+    client.update_smt_root(&root);
 }
 
 // ── chain address helpers ─────────────────────────────────────────────────────
