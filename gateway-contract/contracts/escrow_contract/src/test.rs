@@ -965,3 +965,22 @@ fn test_initialize_twice_returns_already_initialized() {
         Err(Ok(err)) if err == Error::from_contract_error(EscrowError::AlreadyInitialized as u32)
     ));
 }
+
+// ─── auto-pay self-payment test ──────────────────────────────────────────────
+
+#[test]
+fn test_auto_pay_self_payment_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client, token, _token_admin, from, _to) = setup_test(&env);
+
+    let owner = Address::generate(&env);
+    create_vault(&env, &contract_id, &from, &owner, &token, 1000);
+
+    // Attempt to setup auto-pay with from == to (self-payment)
+    let result = client.try_setup_auto_pay(&from, &from, &100, &86400);
+    assert!(matches!(
+        result,
+        Err(Ok(err)) if err == Error::from_contract_error(EscrowError::SelfPaymentNotAllowed as u32)
+    ));
+}
