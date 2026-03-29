@@ -290,6 +290,15 @@ fn test_close_auction_early_fails() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #8)")]
+fn test_close_nonexistent_auction_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = setup(&env);
+    client.close_auction_by_id(&999);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #1)")]
 fn test_claim_not_winner_fails() {
     let env = Env::default();
