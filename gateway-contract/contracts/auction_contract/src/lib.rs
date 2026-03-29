@@ -219,6 +219,9 @@ impl AuctionContract {
     }
 
     pub fn close_auction_by_id(env: Env, id: u32) {
+        if !storage::auction_exists(&env, id) {
+            soroban_sdk::panic_with_error!(&env, errors::AuctionError::AuctionNotOpen);
+        }
         let end_time = storage::auction_get_end_time(&env, id);
         if env.ledger().timestamp() < end_time {
             soroban_sdk::panic_with_error!(&env, errors::AuctionError::AuctionNotClosed);
