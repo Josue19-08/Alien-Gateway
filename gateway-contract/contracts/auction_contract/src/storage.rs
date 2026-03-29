@@ -85,7 +85,7 @@ pub fn auction_get_seller(env: &Env, id: u32) -> Address {
     env.storage()
         .persistent()
         .get(&AuctionKey::Seller(id))
-        .unwrap()
+        .expect("seller must be set before auction close")
 }
 
 pub fn auction_set_seller(env: &Env, id: u32, seller: &Address) {
@@ -102,7 +102,7 @@ pub fn auction_get_asset(env: &Env, id: u32) -> Address {
     env.storage()
         .persistent()
         .get(&AuctionKey::Asset(id))
-        .unwrap()
+        .expect("asset must be set at auction creation")
 }
 
 pub fn auction_set_asset(env: &Env, id: u32, asset: &Address) {
@@ -191,6 +191,40 @@ pub fn auction_is_claimed(env: &Env, id: u32) -> bool {
 
 pub fn auction_set_claimed(env: &Env, id: u32) {
     let key = AuctionKey::Claimed(id);
+    env.storage().persistent().set(&key, &true);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
+}
+
+pub fn auction_get_outbid_amount(env: &Env, id: u32, bidder: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&AuctionKey::OutbidAmount(id, bidder.clone()))
+        .unwrap_or(0)
+}
+
+pub fn auction_set_outbid_amount(env: &Env, id: u32, bidder: &Address, amount: i128) {
+    let key = AuctionKey::OutbidAmount(id, bidder.clone());
+    env.storage().persistent().set(&key, &amount);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
+}
+
+pub fn auction_is_bid_refunded(env: &Env, id: u32, bidder: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&AuctionKey::BidRefunded(id, bidder.clone()))
+        .unwrap_or(false)
+}
+
+pub fn auction_set_bid_refunded(env: &Env, id: u32, bidder: &Address) {
+    let key = AuctionKey::BidRefunded(id, bidder.clone());
     env.storage().persistent().set(&key, &true);
     env.storage().persistent().extend_ttl(
         &key,
