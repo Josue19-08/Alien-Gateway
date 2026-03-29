@@ -77,6 +77,32 @@ pub struct VaultCancelEvent {
     pub refunded_amount: i128,
 }
 
+/// Event emitted when a deposit is made into a vault.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DepositEvent {
+    /// The commitment identifier of the vault.
+    #[topic]
+    pub commitment: BytesN<32>,
+    /// The amount of tokens deposited.
+    pub amount: i128,
+    /// The new balance of the vault.
+    pub new_balance: i128,
+}
+
+/// Event emitted when tokens are withdrawn from a vault.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawEvent {
+    /// The commitment identifier of the vault.
+    #[topic]
+    pub commitment: BytesN<32>,
+    /// The amount of tokens withdrawn.
+    pub amount: i128,
+    /// The new balance of the vault.
+    pub new_balance: i128,
+}
+
 /// Helper for emitting contract events.
 pub struct Events;
 
@@ -166,18 +192,23 @@ impl Events {
         .publish(env);
     }
 
-    /// Emits a DEPOSIT event with topics (symbol!("DEPOSIT"), commitment)
-    /// and data (owner, amount, new_balance).
-    pub fn deposit(
-        env: &Env,
-        commitment: BytesN<32>,
-        owner: Address,
-        amount: i128,
-        new_balance: i128,
-    ) {
-        env.events().publish(
-            (symbol_short!("DEPOSIT"), commitment),
-            (owner, amount, new_balance),
-        );
+    /// Emits a DEPOSIT event to the host.
+    pub fn deposit(env: &Env, commitment: BytesN<32>, amount: i128, new_balance: i128) {
+        DepositEvent {
+            commitment,
+            amount,
+            new_balance,
+        }
+        .publish(env);
+    }
+
+    /// Emits a WITHDRAW event to the host.
+    pub fn withdraw(env: &Env, commitment: BytesN<32>, amount: i128, new_balance: i128) {
+        WithdrawEvent {
+            commitment,
+            amount,
+            new_balance,
+        }
+        .publish(env);
     }
 }

@@ -1,5 +1,7 @@
+use crate::errors::CoreError;
 use crate::events::REGISTER_EVENT;
-use soroban_sdk::{contracttype, Address, BytesN, Env};
+use crate::storage::{PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD};
+use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env};
 
 // Storage Keys
 #[contracttype]
@@ -11,10 +13,22 @@ pub enum DataKey {
 pub struct Registration;
 
 impl Registration {
-    /// Register a username commitment (Poseidon hash of username).
-    /// Maps the commitment to the caller's wallet address.
-    /// Rejects duplicate commitments.
-    /// Emits REGISTER event with (commitment, owner).
+    /// Registers a username commitment (Poseidon hash of username).
+    ///
+    /// Maps a username commitment to the caller's wallet address. The caller must authorize
+    /// this transaction. Rejects duplicate commitments to ensure uniqueness.
+    /// This is used to establish the initial link between a username and its owner.
+    ///
+    /// ### Arguments
+    /// - `env`: The Soroban contract environment.
+    /// - `caller`: The address registering the commitment. Must be authorized.
+    /// - `commitment`: A 32-byte Poseidon hash of the username.
+    ///
+    /// ### Errors
+    /// - `AlreadyRegistered`: If the commitment has already been registered.
+    ///
+    /// ### Events
+    /// - Emits `REGISTER_EVENT` with (commitment, owner).
     pub fn register(env: Env, caller: Address, commitment: BytesN<32>) {
         // Require authentication from the caller
         caller.require_auth();
@@ -22,11 +36,16 @@ impl Registration {
         // Check if commitment already exists
         let key = DataKey::Commitment(commitment.clone());
         if env.storage().persistent().has(&key) {
-            panic!("Commitment already registered");
+            panic_with_error!(&env, CoreError::AlreadyRegistered);
         }
 
         // Store commitment -> address mapping
         env.storage().persistent().set(&key, &caller);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
 
         // Emit registration event
         #[allow(deprecated)]
@@ -34,8 +53,18 @@ impl Registration {
             .publish((REGISTER_EVENT,), (commitment, caller));
     }
 
-    /// Get the owner address for a given commitment.
-    /// Returns None if the commitment is not registered.
+    /// Retrieves the owner address for a given commitment.
+    ///
+    /// Returns the wallet address associated with the commitment, or None if not yet registered.
+    /// This is a read-only query operation with no authentication requirement.
+    ///
+    /// ### Arguments
+    /// - `env`: The Soroban contract environment.
+    /// - `commitment`: The 32-byte username commitment to look up.
+    ///
+    /// ### Returns
+    /// - `Some(Address)` if the commitment is registered.
+    /// - `None` if the commitment is not found.
     pub fn get_owner(env: Env, commitment: BytesN<32>) -> Option<Address> {
         let key = DataKey::Commitment(commitment);
         env.storage().persistent().get(&key)

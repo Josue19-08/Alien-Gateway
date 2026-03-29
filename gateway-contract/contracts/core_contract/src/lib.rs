@@ -1,11 +1,101 @@
 #![no_std]
 
+//! # Core Identity Contract
+//!
+//! This contract implements a privacy-preserving identity and resolution system
+//! built around a **commitment-based ownership model**. It enables users to
+//! register usernames, associate them with blockchain addresses (including
+//! Stellar), and transfer ownership securely.
+//!
+//! ## Identity Model Overview
+//!
+//! The system is built on the following flow:
+//!
+//! ```text
+//! Commitment (hash) → Username → SMT Root → Resolved Addresses
+//! ```
+//!
+//! ### 1. Commitment (`h: BytesN<32>`)
+//! - A cryptographic hash representing a username (or identity).
+//! - Acts as the **primary identifier** in the system.
+//! - Designed to preserve privacy by avoiding plaintext usernames on-chain.
+//!
+//! ### 2. Username Ownership
+//! - A commitment is **owned by an `Address`**.
+//! - Ownership is established during registration.
+//! - Ownership is required for all mutations (e.g., adding addresses, transfer).
+//!
+//! ### 3. Sparse Merkle Tree (SMT Root)
+//! - The global state of all commitments is represented by an SMT root.
+//! - The root is stored on-chain and updated by the contract admin.
+//! - ZK proofs rely on this root to validate membership and correctness.
+//!
+//! ### 4. Address Resolution
+//! - A commitment can resolve to:
+//!   - A primary wallet address
+//!   - Optional memo
+//!   - Multiple chain-specific addresses
+//!   - Multiple Stellar addresses
+//!   - Optional shielded (privacy-preserving) address
+//!
+//! ## Privacy & Zero-Knowledge Proofs
+//!
+//! Certain operations (e.g., resolver registration, ownership transfer) support
+//! **zero-knowledge proofs (ZKPs)** to:
+//!
+//! - Prove ownership or validity without revealing sensitive data
+//! - Enable privacy-preserving interactions
+//!
+//! The contract verifies proofs against the current SMT root.
+//!
+//! ## Ownership & Transfer Semantics
+//!
+//! Ownership of a commitment can be transferred in two ways:
+//!
+//! ### 1. Direct Transfer
+//! - Requires the current owner (`Address`) to authorize the transfer.
+//! - Updates the owner mapping immediately.
+//!
+//! ### 2. ZK-based Transfer
+//! - Uses a zero-knowledge proof to authorize the transfer.
+//! - Enables privacy-preserving ownership changes.
+//!
+//! ### Guarantees
+//! - Only the **current valid owner** (or valid proof) can transfer ownership.
+//! - All ownership changes are **atomic and consistent**.
+//!
+//! ## Storage Model
+//!
+//! The contract maintains:
+//! - Commitment → Owner mappings
+//! - Commitment → Address mappings (multi-chain + Stellar)
+//! - Commitment → Metadata (memo, privacy mode)
+//! - SMT root (global state anchor)
+//!
+//! Soft constraints:
+//! - No plaintext usernames stored
+//! - All lookups are keyed by commitment
+//!
+//! ## Purpose
+//!
+//! This contract enables:
+//! - Decentralized username ownership
+//! - Cross-chain identity resolution
+//! - Privacy-preserving identity operations
+//! - Secure and auditable ownership transfers
+//!
+//! It is designed for interoperability with wallets, identity systems,
+//! and off-chain indexers that rely on deterministic resolution.
+
 pub mod address_manager;
+pub mod admin;
 pub mod errors;
 pub mod events;
 pub mod registration;
+pub mod resolver;
 pub mod smt_root;
 pub mod storage;
+pub mod transfer;
 pub mod types;
 pub mod zk_verifier;
 
@@ -13,254 +103,82 @@ pub mod zk_verifier;
 mod test;
 
 use address_manager::AddressManager;
-use errors::CoreError;
-use events::{REGISTER_EVENT, TRANSFER_EVENT};
+use admin::Admin;
 use registration::Registration;
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, BytesN, Env};
-use types::{ChainType, PrivacyMode, PublicSignals, ResolveData};
+use resolver::Resolver;
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env};
+use transfer::Transfer;
+use types::{ChainType, PrivacyMode, PublicSignals};
 
 #[contract]
 pub struct Contract;
 
+#[rustfmt::skip]
 #[contractimpl]
 impl Contract {
-    pub fn get_smt_root(env: Env) -> BytesN<32> {
-        smt_root::SmtRoot::get_root(env.clone())
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::RootNotSet))
-    }
+    /// Initializes the contract with the owner. See [admin::Admin::initialize].
+    pub fn initialize(e: Env, o: Address) { Admin::initialize(e, o) }
 
-    pub fn register_resolver(
-        env: Env,
-        caller: Address,
-        commitment: BytesN<32>,
-        proof: Bytes,
-        public_signals: PublicSignals,
-    ) {
-        caller.require_auth();
+    /// Retrieves the contract owner. See [admin::Admin::get_contract_owner].
+    pub fn get_contract_owner(e: Env) -> Address { Admin::get_contract_owner(e) }
 
-        let key = storage::DataKey::Resolver(commitment.clone());
-        if env.storage().persistent().has(&key) {
-            panic_with_error!(&env, CoreError::DuplicateCommitment);
-        }
+    /// Retrieves the current SMT root. See [admin::Admin::get_smt_root].
+    pub fn get_smt_root(e: Env) -> BytesN<32> { Admin::get_smt_root(e) }
 
-        let current_root = smt_root::SmtRoot::get_root(env.clone())
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::RootNotSet));
-        if public_signals.old_root != current_root {
-            panic_with_error!(&env, CoreError::StaleRoot);
-        }
+    /// Updates the SMT root with owner authorization. See [admin::Admin::update_smt_root].
+    pub fn update_smt_root(e: Env, r: BytesN<32>) { Admin::update_smt_root(e, r) }
 
-        if !zk_verifier::ZkVerifier::verify_groth16_proof(&env, &proof, &public_signals) {
-            panic_with_error!(&env, CoreError::InvalidProof);
-        }
+    /// Registers a username with ZK proof validation. See [resolver::Resolver::register_resolver].
+    pub fn register_resolver(e: Env, c: Address, h: BytesN<32>, p: Bytes, s: PublicSignals) { Resolver::register_resolver(e, c, h, p, s); }
 
-        let data = ResolveData {
-            wallet: caller.clone(),
-            memo: None,
-        };
-        env.storage().persistent().set(&key, &data);
+    /// Sets a memo for a registered commitment. See [resolver::Resolver::set_memo].
+    pub fn set_memo(e: Env, c: BytesN<32>, m: u64) { Resolver::set_memo(e, c, m) }
 
-        smt_root::SmtRoot::update_root(&env, public_signals.new_root);
+    /// Sets the privacy mode for a commitment. See [resolver::Resolver::set_privacy_mode].
+    pub fn set_privacy_mode(e: Env, h: BytesN<32>, m: PrivacyMode) { Resolver::set_privacy_mode(e, h, m); }
 
-        #[allow(deprecated)]
-        env.events()
-            .publish((REGISTER_EVENT,), (commitment, caller));
-    }
+    /// Retrieves the privacy mode for a commitment. See [resolver::Resolver::get_privacy_mode].
+    pub fn get_privacy_mode(e: Env, h: BytesN<32>) -> PrivacyMode { Resolver::get_privacy_mode(e, h) }
 
-    pub fn set_memo(env: Env, commitment: BytesN<32>, memo_id: u64) {
-        let mut data = env
-            .storage()
-            .persistent()
-            .get::<storage::DataKey, ResolveData>(&storage::DataKey::Resolver(commitment.clone()))
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound));
+    /// Resolves a commitment to a wallet and memo. See [resolver::Resolver::resolve].
+    pub fn resolve(e: Env, c: BytesN<32>) -> (Address, Option<u64>) { Resolver::resolve(e, c) }
 
-        data.memo = Some(memo_id);
-        env.storage()
-            .persistent()
-            .set(&storage::DataKey::Resolver(commitment), &data);
-    }
+    /// Registers a username commitment. See [registration::Registration::register].
+    pub fn register(e: Env, c: Address, h: BytesN<32>) { Registration::register(e, c, h) }
 
-    pub fn set_privacy_mode(env: Env, username_hash: BytesN<32>, mode: PrivacyMode) {
-        AddressManager::set_privacy_mode(env, username_hash, mode);
-    }
+    /// Gets the owner of a commitment. See [registration::Registration::get_owner].
+    pub fn get_owner(e: Env, h: BytesN<32>) -> Option<Address> { Registration::get_owner(e, h) }
 
-    pub fn get_privacy_mode(env: Env, username_hash: BytesN<32>) -> PrivacyMode {
-        AddressManager::get_privacy_mode(env, username_hash)
-    }
+    /// Adds a blockchain address for a commitment. See [address_manager::AddressManager::add_chain_address].
+    pub fn add_chain_address(e: Env, c: Address, h: BytesN<32>, t: ChainType, a: Bytes) { AddressManager::add_chain_address(e, c, h, t, a); }
 
-    pub fn resolve(env: Env, commitment: BytesN<32>) -> (Address, Option<u64>) {
-        match env
-            .storage()
-            .persistent()
-            .get::<storage::DataKey, ResolveData>(&storage::DataKey::Resolver(commitment.clone()))
-        {
-            Some(data) => {
-                if AddressManager::get_privacy_mode(env.clone(), commitment) == PrivacyMode::Private
-                {
-                    (env.current_contract_address(), data.memo)
-                } else {
-                    (data.wallet, data.memo)
-                }
-            }
-            None => panic_with_error!(&env, CoreError::NotFound),
-        }
-    }
+    /// Gets the blockchain address for a commitment. See [address_manager::AddressManager::get_chain_address].
+    pub fn get_chain_address(e: Env, h: BytesN<32>, t: ChainType) -> Option<Bytes> { AddressManager::get_chain_address(e, h, t) }
 
-    pub fn register(env: Env, caller: Address, commitment: BytesN<32>) {
-        Registration::register(env, caller, commitment);
-    }
+    /// Removes a blockchain address for a commitment. See [address_manager::AddressManager::remove_chain_address].
+    pub fn remove_chain_address(e: Env, c: Address, h: BytesN<32>, t: ChainType) { AddressManager::remove_chain_address(e, c, h, t); }
 
-    pub fn get_owner(env: Env, commitment: BytesN<32>) -> Option<Address> {
-        Registration::get_owner(env, commitment)
-    }
+    /// Adds a Stellar address for a commitment. See [address_manager::AddressManager::add_stellar_address].
+    pub fn add_stellar_address(e: Env, c: Address, h: BytesN<32>, a: Address) { AddressManager::add_stellar_address(e, c, h, a); }
+    /// Removes a Stellar address for a commitment. See [address_manager::AddressManager::remove_stellar_address].
+    pub fn remove_stellar_address(e: Env, c: Address, h: BytesN<32>, a: Address) { AddressManager::remove_stellar_address(e, c, h, a); }
+    pub fn get_stellar_addresses(e: Env, h: BytesN<32>) -> soroban_sdk::Vec<Address> { AddressManager::get_stellar_addresses(e, h) }
 
-    pub fn add_chain_address(
-        env: Env,
-        caller: Address,
-        username_hash: BytesN<32>,
-        chain: ChainType,
-        address: Bytes,
-    ) {
-        AddressManager::add_chain_address(env, caller, username_hash, chain, address);
-    }
+    /// Resolves a commitment to its Stellar address. See [address_manager::AddressManager::resolve_stellar].
+    pub fn resolve_stellar(e: Env, h: BytesN<32>) -> Address { AddressManager::resolve_stellar(e, h) }
 
-    pub fn get_chain_address(
-        env: Env,
-        username_hash: BytesN<32>,
-        chain: ChainType,
-    ) -> Option<Bytes> {
-        AddressManager::get_chain_address(env, username_hash, chain)
-    }
+    /// Transfers username ownership. See [transfer::Transfer::transfer_ownership].
+    pub fn transfer_ownership(e: Env, c: Address, h: BytesN<32>, n: Address) { Transfer::transfer_ownership(e, c, h, n); }
 
-    pub fn remove_chain_address(
-        env: Env,
-        caller: Address,
-        username_hash: BytesN<32>,
-        chain: ChainType,
-    ) {
-        AddressManager::remove_chain_address(env, caller, username_hash, chain);
-    }
+    /// Transfers username ownership with ZK proof. See [transfer::Transfer::transfer].
+    pub fn transfer(e: Env, c: Address, h: BytesN<32>, n: Address, p: Bytes, s: PublicSignals) { Transfer::transfer(e, c, h, n, p, s); }
 
-    pub fn add_stellar_address(
-        env: Env,
-        caller: Address,
-        username_hash: BytesN<32>,
-        stellar_address: Address,
-    ) {
-        caller.require_auth();
+    /// Adds a shielded address for a commitment. See [address_manager::AddressManager::add_shielded_address].
+    pub fn add_shielded_address(e: Env, c: Address, h: BytesN<32>, a: BytesN<32>) { AddressManager::add_shielded_address(e, c, h, a); }
 
-        let owner = Registration::get_owner(env.clone(), username_hash.clone())
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound));
+    /// Gets the shielded address for a commitment. See [address_manager::AddressManager::get_shielded_address].
+    pub fn get_shielded_address(e: Env, h: BytesN<32>) -> Option<BytesN<32>> { AddressManager::get_shielded_address(e, h) }
 
-        if owner != caller {
-            panic_with_error!(&env, CoreError::NotFound);
-        }
-
-        env.storage().persistent().set(
-            &storage::DataKey::StellarAddress(username_hash),
-            &stellar_address,
-        );
-    }
-
-    /// Transfer ownership of a commitment to a new owner.
-    /// The caller must be the current registered owner.
-    /// Panics with `Unauthorized` if caller is not the owner.
-    /// Panics with `SameOwner` if new_owner equals the current owner.
-    pub fn transfer_ownership(
-        env: Env,
-        caller: Address,
-        commitment: BytesN<32>,
-        new_owner: Address,
-    ) {
-        caller.require_auth();
-
-        let key = registration::DataKey::Commitment(commitment.clone());
-        let current_owner: Address = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound));
-
-        if caller != current_owner {
-            panic_with_error!(&env, CoreError::Unauthorized);
-        }
-
-        if new_owner == current_owner {
-            panic_with_error!(&env, CoreError::SameOwner);
-        }
-
-        env.storage().persistent().set(&key, &new_owner);
-
-        #[allow(deprecated)]
-        env.events()
-            .publish((TRANSFER_EVENT,), (commitment, caller, new_owner));
-    }
-
-    /// Transfer ownership of a commitment with ZK proof verification and SMT root update.
-    /// The caller must be the current registered owner.
-    /// Panics with `Unauthorized` if caller is not the owner.
-    /// Panics with `SameOwner` if new_owner equals the current owner.
-    /// Panics with `StaleRoot` if public_signals.old_root does not match the on-chain root.
-    pub fn transfer(
-        env: Env,
-        caller: Address,
-        commitment: BytesN<32>,
-        new_owner: Address,
-        proof: Bytes,
-        public_signals: PublicSignals,
-    ) {
-        caller.require_auth();
-
-        let key = registration::DataKey::Commitment(commitment.clone());
-        let current_owner: Address = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound));
-
-        if caller != current_owner {
-            panic_with_error!(&env, CoreError::Unauthorized);
-        }
-
-        if new_owner == current_owner {
-            panic_with_error!(&env, CoreError::SameOwner);
-        }
-
-        // SMT root consistency
-        let current_root = smt_root::SmtRoot::get_root(env.clone())
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::RootNotSet));
-        if public_signals.old_root != current_root {
-            panic_with_error!(&env, CoreError::StaleRoot);
-        }
-
-        // ZK proof verification (Phase 4 stub)
-        if !zk_verifier::ZkVerifier::verify_groth16_proof(&env, &proof, &public_signals) {
-            panic_with_error!(&env, CoreError::InvalidProof);
-        }
-
-        // Update ownership
-        env.storage().persistent().set(&key, &new_owner);
-
-        // Advance SMT root
-        smt_root::SmtRoot::update_root(&env, public_signals.new_root);
-
-        // Emit TRANSFER event
-        #[allow(deprecated)]
-        env.events()
-            .publish((TRANSFER_EVENT,), (commitment, caller, new_owner));
-    }
-
-    /// Resolve a username hash to its primary linked Stellar address.
-    ///
-    /// Returns `NotFound` if the username hash is not registered.
-    /// Returns `NoAddressLinked` if registered but no primary Stellar address has been set.
-    pub fn resolve_stellar(env: Env, username_hash: BytesN<32>) -> Address {
-        if Registration::get_owner(env.clone(), username_hash.clone()).is_none() {
-            panic_with_error!(&env, CoreError::NotFound);
-        }
-
-        env.storage()
-            .persistent()
-            .get::<storage::DataKey, Address>(&storage::DataKey::StellarAddress(username_hash))
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NoAddressLinked))
-    }
+    /// Checks if a commitment has a shielded address. See [address_manager::AddressManager::is_shielded].
+    pub fn is_shielded(e: Env, h: BytesN<32>) -> bool { AddressManager::is_shielded(e, h) }
 }

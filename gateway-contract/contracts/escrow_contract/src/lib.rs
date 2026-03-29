@@ -14,9 +14,9 @@ mod test;
 use crate::errors::EscrowError;
 use crate::events::Events;
 use crate::storage::{
-    increment_auto_pay_id, increment_payment_id, read_auto_pay, read_registration_contract,
-    read_vault_config, read_vault_state, write_auto_pay, write_registration_contract,
-    write_scheduled_payment, write_vault_config, write_vault_state,
+    increment_auto_pay_id, increment_payment_id, read_auto_pay, read_auto_pay_count,
+    read_registration_contract, read_vault_config, read_vault_state, write_auto_pay,
+    write_registration_contract, write_scheduled_payment, write_vault_config, write_vault_state,
 };
 use crate::types::{AutoPay, DataKey, ScheduledPayment, VaultConfig, VaultState};
 use soroban_sdk::{
@@ -57,6 +57,11 @@ impl EscrowContract {
     /// - `CommitmentNotRegistered`: If no owner is found for the commitment.
     /// - `VaultAlreadyExists`: If a vault already exists for this commitment.
     pub fn create_vault(env: Env, commitment: BytesN<32>, token: Address) {
+        soroban_sdk::log!(
+            &env,
+            "[CONTRACT DEBUG] create_vault: contract address = {:?}",
+            env.current_contract_address()
+        );
         // 1. Load Registration contract address (must be initialized first).
         let registration = read_registration_contract(&env)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::CommitmentNotRegistered));
@@ -65,7 +70,7 @@ impl EscrowContract {
         let owner: Option<Address> = env.invoke_contract(
             &registration,
             &Symbol::new(&env, "get_owner"),
-            vec![&env, commitment.clone().into_val(&env)],
+            vec![&env, commitment.into_val(&env)],
         );
         let owner =
             owner.unwrap_or_else(|| panic_with_error!(&env, EscrowError::CommitmentNotRegistered));
@@ -103,37 +108,107 @@ impl EscrowContract {
         Events::vault_crt(&env, commitment, token, owner);
     }
 
-    /// Deposits tokens into an active vault.
+    /// Deposits tokens into an existing vault and increases its internal balance.
     ///
-    /// The vault owner must authorize the call. Funds are transferred from the
-    /// owner to this contract and reflected in the vault's tracked balance.
+    /// The vault owner must authorize this call. Tokens are transferred from the
+    /// owner to this contract before the vault balance is updated.
+    ///
+    /// ### Arguments
+    /// - `commitment`: The `BytesN<32>` identity commitment of the vault.
+    /// - `amount`: The amount of tokens to deposit. Must be > 0.
     ///
     /// ### Errors
     /// - `InvalidAmount`: If `amount <= 0`.
     /// - `VaultNotFound`: If the vault does not exist.
-    /// - `VaultInactive`: If the vault has been cancelled/inactivated.
+    /// - `VaultInactive`: If the vault is cancelled/inactive.
     pub fn deposit(env: Env, commitment: BytesN<32>, amount: i128) {
+        soroban_sdk::log!(
+            &env,
+            "[CONTRACT DEBUG] deposit: contract address = {:?}",
+            env.current_contract_address()
+        );
         if amount <= 0 {
             panic_with_error!(&env, EscrowError::InvalidAmount);
         }
 
         let config = read_vault_config(&env, &commitment)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
-        config.owner.require_auth();
-
         let mut state = read_vault_state(&env, &commitment)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
+
+        config.owner.require_auth();
+
         if !state.is_active {
             panic_with_error!(&env, EscrowError::VaultInactive);
         }
 
+        // Transfer tokens from caller to the contract first
         let token_client = token::Client::new(&env, &config.token);
-        token_client.transfer(&config.owner, &env.current_contract_address(), &amount);
+        token_client.transfer(&config.owner, env.current_contract_address(), &amount);
 
-        state.balance += amount;
+        // Update state safely
+        state.balance = state
+            .balance
+            .checked_add(amount)
+            .expect("vault balance overflow");
         write_vault_state(&env, &commitment, &state);
 
-        Events::deposit(&env, commitment, config.owner, amount, state.balance);
+        // Emit DEPOSIT event.
+        Events::deposit(&env, commitment, amount, state.balance);
+    }
+
+    /// Withdraws tokens from an existing vault.
+    ///
+    /// The vault owner must authorize this call. Tokens are transferred from the
+    /// contract to the owner before the vault balance is updated.
+    ///
+    /// ### Arguments
+    /// - `commitment`: The BytesN<32> identity commitment of the vault.
+    /// - `amount`: The amount of tokens to withdraw. Must be > 0.
+    ///
+    /// ### Errors
+    /// - `InvalidAmount`: If `amount <= 0`.
+    /// - `VaultNotFound`: If the vault does not exist.
+    /// - `VaultInactive`: If the vault is cancelled/inactive.
+    /// - `InsufficientBalance`: If the vault balance is less than `amount`.
+    pub fn withdraw(env: Env, commitment: BytesN<32>, amount: i128) {
+        soroban_sdk::log!(
+            &env,
+            "[CONTRACT DEBUG] withdraw: contract address = {:?}",
+            env.current_contract_address()
+        );
+        if amount <= 0 {
+            panic_with_error!(&env, EscrowError::InvalidAmount);
+        }
+
+        let config = read_vault_config(&env, &commitment)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
+        let mut state = read_vault_state(&env, &commitment)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
+
+        config.owner.require_auth();
+
+        if !state.is_active {
+            panic_with_error!(&env, EscrowError::VaultInactive);
+        }
+
+        if state.balance < amount {
+            panic_with_error!(&env, EscrowError::InsufficientBalance);
+        }
+
+        // Transfer tokens from contract to owner
+        let token_client = token::Client::new(&env, &config.token);
+        token_client.transfer(&env.current_contract_address(), &config.owner, &amount);
+
+        // Update state safely
+        state.balance = state
+            .balance
+            .checked_sub(amount)
+            .expect("vault balance underflow");
+        write_vault_state(&env, &commitment, &state);
+
+        // Emit WITHDRAW event.
+        Events::withdraw(&env, commitment, amount, state.balance);
     }
 
     /// Schedules a payment from one vault to another.
@@ -163,6 +238,11 @@ impl EscrowContract {
         amount: i128,
         release_at: u64,
     ) -> Result<u32, EscrowError> {
+        soroban_sdk::log!(
+            &env,
+            "[CONTRACT DEBUG] schedule_payment: contract address = {:?}",
+            env.current_contract_address()
+        );
         // 1. Validate Input
         if amount <= 0 {
             return Err(EscrowError::InvalidAmount);
@@ -221,6 +301,20 @@ impl EscrowContract {
         Ok(payment_id)
     }
 
+    /// Executes a previously scheduled payment once its release time has passed.
+    ///
+    /// Transfers the reserved tokens from this contract to the resolved owner of
+    /// the destination vault. Can be called by anyone (trustless keeper/bot).
+    ///
+    /// ### Arguments
+    /// - `payment_id`: The unique ID returned by [`EscrowContract::schedule_payment`].
+    ///
+    /// ### Errors
+    /// - `PaymentNotFound`: If no payment exists for `payment_id`.
+    /// - `PaymentAlreadyExecuted`: If the payment has already been executed.
+    /// - `PaymentNotYetDue`: If the current ledger time is before `release_at`.
+    /// - `VaultNotFound`: If the source vault no longer exists.
+    /// - `VaultInactive`: If the source vault has been cancelled.
     pub fn execute_scheduled(env: Env, payment_id: u32) {
         let key = DataKey::ScheduledPayment(payment_id);
         let mut payment: ScheduledPayment = env
@@ -258,6 +352,12 @@ impl EscrowContract {
     ///
     /// Marks the vault as inactive and refunds any remaining balance to the owner.
     /// Once cancelled, no new deposits/payments/auto-pays should be triggerable on it.
+    ///
+    /// ### Arguments
+    /// - `commitment`: The `BytesN<32>` identity commitment of the vault to cancel.
+    ///
+    /// ### Errors
+    /// - `VaultNotFound`: If no vault exists for `commitment`.
     pub fn cancel_vault(env: Env, commitment: BytesN<32>) {
         // 1) Load vault config + authenticate as owner.
         let config = read_vault_config(&env, &commitment)
@@ -288,6 +388,37 @@ impl EscrowContract {
 
         // 5) Emit cancellation event.
         Events::vault_cancel(&env, commitment, refunded_amount);
+    }
+
+    /// Withdraws tokens from an active vault back to the owner.
+    ///
+    /// The vault owner must authorize this call. The vault remains active and
+    /// its balance is reduced by the withdrawn amount.
+    pub fn withdraw(env: Env, commitment: BytesN<32>, amount: i128) {
+        if amount <= 0 {
+            panic_with_error!(&env, EscrowError::InvalidAmount);
+        }
+
+        let config = read_vault_config(&env, &commitment)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
+        let mut state = read_vault_state(&env, &commitment)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
+
+        config.owner.require_auth();
+
+        if !state.is_active {
+            panic_with_error!(&env, EscrowError::VaultInactive);
+        }
+
+        if state.balance < amount {
+            panic_with_error!(&env, EscrowError::InsufficientBalance);
+        }
+
+        state.balance -= amount;
+        write_vault_state(&env, &commitment, &state);
+
+        let token_client = token::Client::new(&env, &config.token);
+        token_client.transfer(&env.current_contract_address(), &config.owner, &amount);
     }
 
     /// Registers a recurring payment rule.
@@ -325,7 +456,12 @@ impl EscrowContract {
             return Err(EscrowError::InvalidInterval);
         }
 
-        // 2. Read Vault config to verify it exists and get the token
+        // 2. Reject self-payment
+        if from == to {
+            return Err(EscrowError::SelfPaymentNotAllowed);
+        }
+
+        // 3. Read Vault config to verify it exists and get the token
         let config = read_vault_config(&env, &from).ok_or(EscrowError::VaultNotFound)?;
 
         // 3. Authenticate caller as owner of from vault
@@ -379,7 +515,7 @@ impl EscrowContract {
             panic_with_error!(&env, EscrowError::IntervalNotElapsed);
         }
 
-        // 3. Load vault state and check balance
+        // 3. Load vault state, verify the vault is active before checking balance.
         let mut state = read_vault_state(&env, &from)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
 
@@ -421,8 +557,38 @@ impl EscrowContract {
             current_time,
         );
     }
+
+    /// Returns the current balance of a vault identified by its commitment.
+    ///
+    /// This is a read-only getter with no side effects and no authentication
+    /// requirement. It performs a single O(1) persistent-storage lookup.
+    ///
+    /// ### Arguments
+    /// - `commitment`: The `BytesN<32>` identifier of the vault.
+    ///
+    /// ### Returns
+    /// - `None` if the vault does not exist.
+    /// - `Some(balance)` with the vault's current available balance.
+    pub fn get_balance(env: Env, commitment: BytesN<32>) -> Option<i128> {
+        read_vault_state(&env, &commitment).map(|state| state.balance)
+    }
+
+    /// Returns the total number of auto-pay rules that have been created.
+    ///
+    /// This equals the next available rule ID, so rule IDs range from `0` to
+    /// `get_auto_pay_count() - 1`. Callers can use this to enumerate all rule
+    /// IDs without guessing.
+    ///
+    /// ### Returns
+    /// - `0` if no auto-pay rules have ever been registered.
+    /// - The count of rules created so far otherwise.
+    pub fn get_auto_pay_count(env: Env) -> u32 {
+        read_auto_pay_count(&env)
+    }
 }
 
+/// Returns the owner address of the vault identified by `commitment`, panicking
+/// with `VaultNotFound` if no vault config exists.
 fn resolve(env: &Env, commitment: &BytesN<32>) -> Address {
     let config = read_vault_config(env, commitment)
         .unwrap_or_else(|| panic_with_error!(env, EscrowError::VaultNotFound));
