@@ -22,3 +22,7 @@ pub fn privacy_set_event(env: &Env) -> Symbol {
 pub fn shielded_add_event(env: &Env) -> Symbol {
     Symbol::new(env, "SHIELDED_ADD")
 }
+
+pub fn username_registered_event(env: &Env) -> Symbol {
+    Symbol::new(env, "UsernameRegistered")
+}
