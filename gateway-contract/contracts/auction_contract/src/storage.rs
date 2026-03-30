@@ -46,11 +46,16 @@ pub fn set_factory_contract(env: &Env, factory: &Address) {
 }
 
 pub fn get_end_time(env: &Env) -> u64 {
-    env.storage().instance().get(&InstanceKey::EndTime).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&InstanceKey::EndTime)
+        .unwrap_or(0)
 }
 
 pub fn set_end_time(env: &Env, end_time: u64) {
-    env.storage().instance().set(&InstanceKey::EndTime, &end_time);
+    env.storage()
+        .instance()
+        .set(&InstanceKey::EndTime, &end_time);
 }
 
 pub fn get_highest_bid(env: &Env) -> u128 {
@@ -260,7 +265,9 @@ pub fn auction_set_bid_refunded(env: &Env, id: u32, bidder: &Address) {
 // --- persistent storage helpers for AuctionState and Bid ---
 
 pub fn get_auction(env: &Env, hash: &BytesN<32>) -> Option<AuctionState> {
-    env.storage().persistent().get(&DataKey::Auction(hash.clone()))
+    env.storage()
+        .persistent()
+        .get(&DataKey::Auction(hash.clone()))
 }
 
 pub fn set_auction(env: &Env, hash: &BytesN<32>, state: &AuctionState) {
@@ -274,11 +281,15 @@ pub fn set_auction(env: &Env, hash: &BytesN<32>, state: &AuctionState) {
 }
 
 pub fn has_auction(env: &Env, hash: &BytesN<32>) -> bool {
-    env.storage().persistent().has(&DataKey::Auction(hash.clone()))
+    env.storage()
+        .persistent()
+        .has(&DataKey::Auction(hash.clone()))
 }
 
 pub fn get_bid(env: &Env, hash: &BytesN<32>, bidder: &Address) -> Option<Bid> {
-    env.storage().persistent().get(&DataKey::Bid(hash.clone(), bidder.clone()))
+    env.storage()
+        .persistent()
+        .get(&DataKey::Bid(hash.clone(), bidder.clone()))
 }
 
 pub fn set_bid(env: &Env, hash: &BytesN<32>, bidder: &Address, bid: &Bid) {
