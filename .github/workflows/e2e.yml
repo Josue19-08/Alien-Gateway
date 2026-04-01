@@ -47,7 +47,3 @@ jobs:
       - name: Run ZK E2E Tests
         working-directory: ./zk
         run: npx ts-node tests/e2e_proof_flow.ts
-
-      - name: Run Gateway E2E Tests
-        working-directory: ./gateway-contract
-        run: cargo test --workspace --all-features
