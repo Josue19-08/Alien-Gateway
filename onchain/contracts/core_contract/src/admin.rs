@@ -1,3 +1,4 @@
+use shared::auth as shared_auth;
 use soroban_sdk::{panic_with_error, Address, BytesN, Env};
 
 use crate::errors::CoreError;
@@ -22,7 +23,7 @@ impl Admin {
     /// ### Events
     /// - Emits `INIT_EVENT` with the owner address.
     pub fn initialize(env: Env, owner: Address) {
-        owner.require_auth();
+        shared_auth::require_address_auth(&owner);
         if storage::is_initialized(&env) {
             panic_with_error!(&env, CoreError::AlreadyInitialized);
         }
@@ -39,7 +40,7 @@ impl Admin {
     /// ### Errors
     /// - `NotFound`: If the contract has not been initialized.
     pub fn get_contract_owner(env: Env) -> Address {
-        storage::get_owner(&env).unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound))
+        shared_auth::unwrap_or_panic(&env, storage::get_owner(&env), CoreError::NotFound)
     }
 
     /// Retrieves the current Sparse Merkle Tree (SMT) root hash.
@@ -52,8 +53,11 @@ impl Admin {
     /// ### Errors
     /// - `RootNotSet`: If the SMT root has not yet been set.
     pub fn get_smt_root(env: Env) -> BytesN<32> {
-        smt_root::SmtRoot::get_root(env.clone())
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::RootNotSet))
+        shared_auth::unwrap_or_panic(
+            &env,
+            smt_root::SmtRoot::get_root(env.clone()),
+            CoreError::RootNotSet,
+        )
     }
 
     /// Updates the SMT root as an authenticated public entry point.
@@ -73,9 +77,9 @@ impl Admin {
     /// ### Events
     /// - Emits `ROOT_UPDATED` event with (old_root, new_root).
     pub fn update_smt_root(env: Env, new_root: BytesN<32>) {
-        let owner = storage::get_owner(&env)
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound));
-        owner.require_auth();
+        let owner =
+            shared_auth::unwrap_or_panic(&env, storage::get_owner(&env), CoreError::NotFound);
+        shared_auth::require_address_auth(&owner);
 
         if let Some(current) = env
             .storage()
