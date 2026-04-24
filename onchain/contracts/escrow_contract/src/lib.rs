@@ -19,7 +19,6 @@ use crate::storage::{
     write_vault_state,
 };
 use crate::types::{AutoPay, DataKey, ScheduledPayment, VaultConfig, VaultState};
-use shared::auth as shared_auth;
 use soroban_sdk::{
     contract, contractimpl, panic_with_error, token, vec, Address, BytesN, Env, IntoVal, Symbol,
 };
@@ -38,7 +37,7 @@ impl EscrowContract {
     /// ### Errors
     /// - `AlreadyInitialized`: If the Registration contract address is already set.
     pub fn initialize(env: Env, admin: Address, registration_contract: Address) {
-        shared_auth::require_address_auth(&admin);
+        admin.require_auth();
         if read_registration_contract(&env).is_some() {
             panic_with_error!(&env, EscrowError::AlreadyInitialized);
         }
@@ -59,11 +58,8 @@ impl EscrowContract {
     /// - `VaultAlreadyExists`: If a vault already exists for this commitment.
     pub fn create_vault(env: Env, commitment: BytesN<32>, token: Address) {
         // 1. Load Registration contract address (must be initialized first).
-        let registration = shared_auth::unwrap_or_panic(
-            &env,
-            read_registration_contract(&env),
-            EscrowError::CommitmentNotRegistered,
-        );
+        let registration = read_registration_contract(&env)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::CommitmentNotRegistered));
 
         // 2. Cross-contract call: resolve owner from Registration contract.
         let owner: Option<Address> = env.invoke_contract(
@@ -71,10 +67,11 @@ impl EscrowContract {
             &Symbol::new(&env, "get_owner"),
             vec![&env, commitment.into_val(&env)],
         );
-        let owner = shared_auth::unwrap_or_panic(&env, owner, EscrowError::CommitmentNotRegistered);
+        let owner =
+            owner.unwrap_or_else(|| panic_with_error!(&env, EscrowError::CommitmentNotRegistered));
 
         // 3. Authenticate: the resolved owner must sign this transaction.
-        shared_auth::require_address_auth(&owner);
+        owner.require_auth();
 
         // 4. Existence guard: reject if a vault already exists for this commitment.
         if read_vault_config(&env, &commitment).is_some() {
@@ -127,7 +124,7 @@ impl EscrowContract {
         let config = read_vault_config(&env, &commitment).ok_or(EscrowError::VaultNotFound)?;
         let mut state = read_vault_state(&env, &commitment).ok_or(EscrowError::VaultNotFound)?;
 
-        require_vault_owner(&config);
+        config.owner.require_auth();
 
         if !state.is_active {
             return Err(EscrowError::VaultInactive);
@@ -168,10 +165,12 @@ impl EscrowContract {
             panic_with_error!(&env, EscrowError::InvalidAmount);
         }
 
-        let config = read_vault_config_or_panic(&env, &commitment);
-        let mut state = read_vault_state_or_panic(&env, &commitment);
+        let config = read_vault_config(&env, &commitment)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
+        let mut state = read_vault_state(&env, &commitment)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
 
-        require_vault_owner(&config);
+        config.owner.require_auth();
 
         if !state.is_active {
             panic_with_error!(&env, EscrowError::VaultInactive);
@@ -238,7 +237,7 @@ impl EscrowContract {
 
         // 3. Authenticate caller as owner of from vault
         // Host-level authentication. Panics with host error if unauthorized.
-        require_vault_owner(&config);
+        config.owner.require_auth();
 
         // 4. Reject if vault is inactive
         if !state.is_active {
@@ -341,7 +340,7 @@ impl EscrowContract {
     pub fn cancel_vault(env: Env, commitment: BytesN<32>) -> Result<(), EscrowError> {
         // 1) Load vault config + authenticate as owner.
         let config = read_vault_config(&env, &commitment).ok_or(EscrowError::VaultNotFound)?;
-        require_vault_owner(&config);
+        config.owner.require_auth();
 
         // 2) Load vault mutable state.
         let mut state = read_vault_state(&env, &commitment).ok_or(EscrowError::VaultNotFound)?;
@@ -413,7 +412,7 @@ impl EscrowContract {
         let config = read_vault_config(&env, &from).ok_or(EscrowError::VaultNotFound)?;
 
         // 3. Authenticate caller as owner of from vault
-        require_vault_owner(&config);
+        config.owner.require_auth();
 
         // 4. Generate AutoPay rule ID
         let rule_id = increment_auto_pay_id(&env)?;
@@ -455,8 +454,9 @@ impl EscrowContract {
     /// Only the registered owner of the `from` vault may cancel its rules.
     pub fn cancel_auto_pay(env: Env, from: BytesN<32>, rule_id: u32) {
         // 1. Resolve and authenticate the vault owner.
-        let config = read_vault_config_or_panic(&env, &from);
-        require_vault_owner(&config);
+        let config = read_vault_config(&env, &from)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
+        config.owner.require_auth();
 
         // 2. Confirm the rule exists before deleting it.
         if read_auto_pay(&env, &from, rule_id).is_none() {
@@ -487,11 +487,8 @@ impl EscrowContract {
     /// - Panics with `InsufficientBalance` if the vault balance is less than the payment amount.
     pub fn trigger_auto_pay(env: Env, from: BytesN<32>, rule_id: u32) {
         // 1. Load AutoPay rule via composite key
-        let mut auto_pay = shared_auth::unwrap_or_panic(
-            &env,
-            read_auto_pay(&env, &from, rule_id),
-            EscrowError::AutoPayNotFound,
-        );
+        let mut auto_pay = read_auto_pay(&env, &from, rule_id)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::AutoPayNotFound));
 
         // 2. Check if interval has elapsed
         let current_time = env.ledger().timestamp();
@@ -502,7 +499,8 @@ impl EscrowContract {
         }
 
         // 3. Load vault state, verify the vault is active before checking balance.
-        let mut state = read_vault_state_or_panic(&env, &from);
+        let mut state = read_vault_state(&env, &from)
+            .unwrap_or_else(|| panic_with_error!(&env, EscrowError::VaultNotFound));
 
         // Reject if the source vault was cancelled.
         if !state.is_active {
@@ -624,29 +622,7 @@ impl EscrowContract {
 /// Returns the owner address of the vault identified by `commitment`, panicking
 /// with `VaultNotFound` if no vault config exists.
 fn resolve(env: &Env, commitment: &BytesN<32>) -> Address {
-    let config = read_vault_config_or_panic(env, commitment);
+    let config = read_vault_config(env, commitment)
+        .unwrap_or_else(|| panic_with_error!(env, EscrowError::VaultNotFound));
     config.owner
-}
-
-/// Loads a vault configuration or panics if the vault does not exist.
-fn read_vault_config_or_panic(env: &Env, commitment: &BytesN<32>) -> VaultConfig {
-    shared_auth::unwrap_or_panic(
-        env,
-        read_vault_config(env, commitment),
-        EscrowError::VaultNotFound,
-    )
-}
-
-/// Loads vault state or panics if the vault does not exist.
-fn read_vault_state_or_panic(env: &Env, commitment: &BytesN<32>) -> VaultState {
-    shared_auth::unwrap_or_panic(
-        env,
-        read_vault_state(env, commitment),
-        EscrowError::VaultNotFound,
-    )
-}
-
-/// Requires authorization from the vault owner.
-fn require_vault_owner(config: &VaultConfig) {
-    shared_auth::require_address_auth(&config.owner);
 }
