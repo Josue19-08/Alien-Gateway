@@ -1,4 +1,3 @@
-use shared::storage as shared_storage;
 use soroban_sdk::{contracttype, Address, BytesN, Env};
 
 use crate::types::PrivacyMode;
@@ -33,7 +32,12 @@ pub enum DataKey {
 
 pub fn set_privacy_mode(env: &Env, username_hash: &BytesN<32>, mode: &PrivacyMode) {
     let key = DataKey::PrivacyMode(username_hash.clone());
-    shared_storage::set_persistent(env, &key, mode);
+    env.storage().persistent().set(&key, mode);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
 }
 
 pub fn get_privacy_mode(env: &Env, username_hash: &BytesN<32>) -> PrivacyMode {
@@ -44,11 +48,11 @@ pub fn get_privacy_mode(env: &Env, username_hash: &BytesN<32>) -> PrivacyMode {
 }
 
 pub fn set_owner(env: &Env, owner: &Address) {
-    shared_storage::set_instance(env, &DataKey::Owner, owner);
+    env.storage().instance().set(&DataKey::Owner, owner);
 }
 
 pub fn get_owner(env: &Env) -> Option<Address> {
-    shared_storage::get_instance(env, &DataKey::Owner)
+    env.storage().instance().get(&DataKey::Owner)
 }
 
 pub fn is_initialized(env: &Env) -> bool {
@@ -57,11 +61,18 @@ pub fn is_initialized(env: &Env) -> bool {
 
 pub fn set_shielded_address(env: &Env, username_hash: &BytesN<32>, commitment: &BytesN<32>) {
     let key = DataKey::ShieldedAddress(username_hash.clone());
-    shared_storage::set_persistent(env, &key, commitment);
+    env.storage().persistent().set(&key, commitment);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
 }
 
 pub fn get_shielded_address(env: &Env, username_hash: &BytesN<32>) -> Option<BytesN<32>> {
-    shared_storage::get_persistent(env, &DataKey::ShieldedAddress(username_hash.clone()))
+    env.storage()
+        .persistent()
+        .get(&DataKey::ShieldedAddress(username_hash.clone()))
 }
 
 pub fn has_shielded_address(env: &Env, username_hash: &BytesN<32>) -> bool {
@@ -72,9 +83,16 @@ pub fn has_shielded_address(env: &Env, username_hash: &BytesN<32>) -> bool {
 
 pub fn set_created_at(env: &Env, username_hash: &BytesN<32>, timestamp: u64) {
     let key = DataKey::CreatedAt(username_hash.clone());
-    shared_storage::set_persistent(env, &key, &timestamp);
+    env.storage().persistent().set(&key, &timestamp);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_LIFETIME_THRESHOLD,
+        PERSISTENT_BUMP_AMOUNT,
+    );
 }
 
 pub fn get_created_at(env: &Env, username_hash: &BytesN<32>) -> Option<u64> {
-    shared_storage::get_persistent(env, &DataKey::CreatedAt(username_hash.clone()))
+    env.storage()
+        .persistent()
+        .get(&DataKey::CreatedAt(username_hash.clone()))
 }

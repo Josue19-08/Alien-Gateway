@@ -12,7 +12,6 @@ mod types;
 #[cfg(test)]
 mod test;
 
-use shared::auth as shared_auth;
 use soroban_sdk::{contract, contractimpl, panic_with_error, Address, BytesN, Env};
 
 use crate::errors::FactoryError;
@@ -67,17 +66,20 @@ impl FactoryContract {
     ///
     /// O(1) - constant time storage lookups and persistence.
     pub fn deploy_username(env: Env, username_hash: BytesN<32>, owner: Address) {
-        require_auction_contract_auth(&env);
+        let auction_contract = match read_auction_contract(&env) {
+            Some(address) => address,
+            None => panic_with_error!(&env, FactoryError::Unauthorized),
+        };
+        auction_contract.require_auth();
 
         if has_username(&env, &username_hash) {
             panic_with_error!(&env, FactoryError::AlreadyDeployed);
         }
 
-        let core_contract = shared_auth::unwrap_or_panic(
-            &env,
-            read_core_contract(&env),
-            FactoryError::CoreContractNotConfigured,
-        );
+        let core_contract = match read_core_contract(&env) {
+            Some(address) => address,
+            None => panic_with_error!(&env, FactoryError::CoreContractNotConfigured),
+        };
 
         let record = UsernameRecord {
             username_hash: username_hash.clone(),
@@ -105,7 +107,11 @@ impl FactoryContract {
     /// * `username_hash` - The 32-byte hash identifying the unique username.
     /// * `new_owner` - The address that will be the new owner.
     pub fn transfer_username(env: Env, username_hash: BytesN<32>, new_owner: Address) {
-        require_auction_contract_auth(&env);
+        let auction_contract = match read_auction_contract(&env) {
+            Some(address) => address,
+            None => panic_with_error!(&env, FactoryError::Unauthorized),
+        };
+        auction_contract.require_auth();
 
         let mut record = get_username(&env, &username_hash).expect("Username not deployed");
 
@@ -187,12 +193,4 @@ impl FactoryContract {
     pub fn core_contract(env: Env) -> Option<Address> {
         read_core_contract(&env)
     }
-}
-
-/// Loads the configured auction contract and requires its authorization.
-fn require_auction_contract_auth(env: &Env) -> Address {
-    let auction_contract =
-        shared_auth::unwrap_or_panic(env, read_auction_contract(env), FactoryError::Unauthorized);
-    shared_auth::require_address_auth(&auction_contract);
-    auction_contract
 }
