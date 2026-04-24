@@ -1,9 +1,10 @@
+use shared::{auth as shared_auth, storage as shared_storage};
 use soroban_sdk::{contracttype, panic_with_error, Address, Bytes, BytesN, Env, Vec};
 
 use crate::errors::{ChainAddressError, CoreError};
 use crate::events::{shielded_add_event, stellar_rem_event, ADDR_ADD, CHAIN_ADD, CHAIN_REM};
 use crate::registration::{DataKey as CommitmentKey, Registration};
-use crate::storage::{self, PERSISTENT_BUMP_AMOUNT, PERSISTENT_LIFETIME_THRESHOLD};
+use crate::storage;
 use crate::types::ChainType;
 
 #[contracttype]
@@ -41,30 +42,20 @@ impl AddressManager {
         chain: ChainType,
         address: Bytes,
     ) {
-        caller.require_auth();
-
         let owner_key = CommitmentKey::Commitment(username_hash.clone());
-        let owner: Address = env
-            .storage()
-            .persistent()
-            .get(&owner_key)
-            .unwrap_or_else(|| panic_with_error!(&env, ChainAddressError::NotRegistered));
-
-        if owner != caller {
-            panic_with_error!(&env, ChainAddressError::Unauthorized);
-        }
+        let owner: Address = shared_auth::unwrap_or_panic(
+            &env,
+            shared_storage::get_persistent(&env, &owner_key),
+            ChainAddressError::NotRegistered,
+        );
+        shared_auth::require_matching_auth(&env, &caller, &owner, ChainAddressError::Unauthorized);
 
         if !Self::validate_address(&chain, &address) {
             panic_with_error!(&env, ChainAddressError::InvalidAddress);
         }
 
         let key = ChainAddrKey::ChainAddress(username_hash.clone(), chain.clone());
-        env.storage().persistent().set(&key, &address);
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_LIFETIME_THRESHOLD,
-            PERSISTENT_BUMP_AMOUNT,
-        );
+        shared_storage::set_persistent(&env, &key, &address);
 
         #[allow(deprecated)]
         env.events()
@@ -90,7 +81,7 @@ impl AddressManager {
         chain: ChainType,
     ) -> Option<Bytes> {
         let key = ChainAddrKey::ChainAddress(username_hash, chain);
-        env.storage().persistent().get(&key)
+        shared_storage::get_persistent(&env, &key)
     }
 
     /// Removes a blockchain address for a commitment on a specified chain.
@@ -116,18 +107,13 @@ impl AddressManager {
         username_hash: BytesN<32>,
         chain: ChainType,
     ) {
-        caller.require_auth();
-
         let owner_key = CommitmentKey::Commitment(username_hash.clone());
-        let owner: Address = env
-            .storage()
-            .persistent()
-            .get(&owner_key)
-            .unwrap_or_else(|| panic_with_error!(&env, ChainAddressError::NotRegistered));
-
-        if owner != caller {
-            panic_with_error!(&env, ChainAddressError::Unauthorized);
-        }
+        let owner: Address = shared_auth::unwrap_or_panic(
+            &env,
+            shared_storage::get_persistent(&env, &owner_key),
+            ChainAddressError::NotRegistered,
+        );
+        shared_auth::require_matching_auth(&env, &caller, &owner, ChainAddressError::Unauthorized);
 
         let key = ChainAddrKey::ChainAddress(username_hash.clone(), chain.clone());
         env.storage().persistent().remove(&key);
@@ -159,30 +145,21 @@ impl AddressManager {
         username_hash: BytesN<32>,
         stellar_address: Address,
     ) {
-        caller.require_auth();
+        let owner = shared_auth::unwrap_or_panic(
+            &env,
+            Registration::get_owner(env.clone(), username_hash.clone()),
+            CoreError::NotFound,
+        );
+        shared_auth::require_matching_auth(&env, &caller, &owner, CoreError::NotFound);
 
-        let owner = Registration::get_owner(env.clone(), username_hash.clone())
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound));
-
-        if owner != caller {
-            panic_with_error!(&env, CoreError::NotFound);
-        }
-
-        let mut linked_addresses: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&storage::DataKey::StellarAddresses(username_hash.clone()))
-            .unwrap_or_else(|| Vec::new(&env));
+        let addresses_key = storage::DataKey::StellarAddresses(username_hash.clone());
+        let mut linked_addresses: Vec<Address> =
+            shared_storage::get_persistent(&env, &addresses_key).unwrap_or_else(|| Vec::new(&env));
         linked_addresses.push_back(stellar_address.clone());
-        env.storage().persistent().set(
-            &storage::DataKey::StellarAddresses(username_hash.clone()),
-            &linked_addresses,
-        );
+        shared_storage::set_persistent(&env, &addresses_key, &linked_addresses);
 
-        env.storage().persistent().set(
-            &storage::DataKey::StellarAddress(username_hash),
-            &stellar_address,
-        );
+        let primary_key = storage::DataKey::StellarAddress(username_hash);
+        shared_storage::set_persistent(&env, &primary_key, &stellar_address);
 
         #[allow(deprecated)]
         env.events().publish((ADDR_ADD,), stellar_address.clone());
@@ -213,21 +190,17 @@ impl AddressManager {
         username_hash: BytesN<32>,
         stellar_address: Address,
     ) {
-        caller.require_auth();
-
-        let owner = Registration::get_owner(env.clone(), username_hash.clone())
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound));
-
-        if owner != caller {
-            panic_with_error!(&env, CoreError::Unauthorized);
-        }
+        let owner = shared_auth::unwrap_or_panic(
+            &env,
+            Registration::get_owner(env.clone(), username_hash.clone()),
+            CoreError::NotFound,
+        );
+        shared_auth::require_matching_auth(&env, &caller, &owner, CoreError::Unauthorized);
 
         // Rebuild the history list without the removed address.
-        let existing: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&storage::DataKey::StellarAddresses(username_hash.clone()))
-            .unwrap_or_else(|| Vec::new(&env));
+        let addresses_key = storage::DataKey::StellarAddresses(username_hash.clone());
+        let existing: Vec<Address> =
+            shared_storage::get_persistent(&env, &addresses_key).unwrap_or_else(|| Vec::new(&env));
 
         let mut updated: Vec<Address> = Vec::new(&env);
         for addr in existing.iter() {
@@ -235,31 +208,21 @@ impl AddressManager {
                 updated.push_back(addr);
             }
         }
-        env.storage().persistent().set(
-            &storage::DataKey::StellarAddresses(username_hash.clone()),
-            &updated,
-        );
+        shared_storage::set_persistent(&env, &addresses_key, &updated);
 
         // If the removed address was the current primary, update or clear it.
-        let primary: Option<Address> = env
-            .storage()
-            .persistent()
-            .get(&storage::DataKey::StellarAddress(username_hash.clone()));
+        let primary_key = storage::DataKey::StellarAddress(username_hash.clone());
+        let primary: Option<Address> = shared_storage::get_persistent(&env, &primary_key);
 
         if let Some(p) = primary {
             if p == stellar_address {
                 if updated.is_empty() {
-                    env.storage()
-                        .persistent()
-                        .remove(&storage::DataKey::StellarAddress(username_hash.clone()));
+                    env.storage().persistent().remove(&primary_key);
                 } else {
                     let last = updated
                         .get(updated.len() - 1)
                         .expect("updated stellar address list should be non-empty");
-                    env.storage().persistent().set(
-                        &storage::DataKey::StellarAddress(username_hash.clone()),
-                        &last,
-                    );
+                    shared_storage::set_persistent(&env, &primary_key, &last);
                 }
             }
         }
@@ -274,12 +237,11 @@ impl AddressManager {
             panic_with_error!(&env, CoreError::NotFound);
         }
 
-        env.storage()
-            .persistent()
-            .get::<storage::DataKey, Vec<Address>>(&storage::DataKey::StellarAddresses(
-                username_hash,
-            ))
-            .unwrap_or_else(|| Vec::new(&env))
+        shared_storage::get_persistent::<storage::DataKey, Vec<Address>>(
+            &env,
+            &storage::DataKey::StellarAddresses(username_hash),
+        )
+        .unwrap_or_else(|| Vec::new(&env))
     }
 
     /// Resolves a commitment to its linked Stellar address.
@@ -302,10 +264,11 @@ impl AddressManager {
             panic_with_error!(&env, CoreError::NotFound);
         }
 
-        env.storage()
-            .persistent()
-            .get::<storage::DataKey, Address>(&storage::DataKey::StellarAddress(username_hash))
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NoAddressLinked))
+        shared_auth::unwrap_or_panic(
+            &env,
+            shared_storage::get_persistent(&env, &storage::DataKey::StellarAddress(username_hash)),
+            CoreError::NoAddressLinked,
+        )
     }
 
     /// Adds a shielded (privacy-preserving) address commitment for a commitment.
@@ -331,12 +294,12 @@ impl AddressManager {
         username_hash: BytesN<32>,
         address_commitment: BytesN<32>,
     ) {
-        caller.require_auth();
-        let owner = Registration::get_owner(env.clone(), username_hash.clone())
-            .unwrap_or_else(|| panic_with_error!(&env, CoreError::NotFound));
-        if owner != caller {
-            panic_with_error!(&env, CoreError::Unauthorized);
-        }
+        let owner = shared_auth::unwrap_or_panic(
+            &env,
+            Registration::get_owner(env.clone(), username_hash.clone()),
+            CoreError::NotFound,
+        );
+        shared_auth::require_matching_auth(&env, &caller, &owner, CoreError::Unauthorized);
         storage::set_shielded_address(&env, &username_hash, &address_commitment);
         #[allow(deprecated)]
         env.events().publish(
