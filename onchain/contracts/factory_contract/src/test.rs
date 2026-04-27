@@ -344,3 +344,55 @@ fn contract_getters_follow_soroban_convention() {
     assert_eq!(factory.auction_contract(), Some(auction_contract));
     assert_eq!(factory.core_contract(), Some(core_contract));
 }
+
+// ── configure dedicated unit tests ────────────────────────────────────────────
+
+#[test]
+fn test_configure_sets_auction_and_core_contracts() {
+    let env = Env::default();
+    let factory_id = env.register(FactoryContract, ());
+    let factory = FactoryContractClient::new(&env, &factory_id);
+    let auction = env.register(StubContract, ());
+    let core = env.register(StubContract, ());
+
+    factory.configure(&auction, &core);
+
+    assert_eq!(factory.auction_contract(), Some(auction));
+    assert_eq!(factory.core_contract(), Some(core));
+}
+
+#[test]
+fn test_configure_can_update_contracts() {
+    let env = Env::default();
+    let factory_id = env.register(FactoryContract, ());
+    let factory = FactoryContractClient::new(&env, &factory_id);
+    let auction_v1 = env.register(StubContract, ());
+    let core_v1 = env.register(StubContract, ());
+    let auction_v2 = env.register(StubContract, ());
+    let core_v2 = env.register(StubContract, ());
+
+    factory.configure(&auction_v1, &core_v1);
+    assert_eq!(factory.auction_contract(), Some(auction_v1));
+    assert_eq!(factory.core_contract(), Some(core_v1));
+
+    factory.configure(&auction_v2, &core_v2);
+    assert_eq!(factory.auction_contract(), Some(auction_v2));
+    assert_eq!(factory.core_contract(), Some(core_v2));
+}
+
+#[test]
+fn test_configure_unconfigured_factory_cannot_deploy() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (factory_id, _) = setup_unconfigured_factory(&env);
+    let owner = Address::generate(&env);
+    let hash = BytesN::from_array(&env, &[42u8; 32]);
+
+    let result = env.try_invoke_contract::<(), FactoryError>(
+        &factory_id,
+        &Symbol::new(&env, "deploy_username"),
+        Vec::<Val>::from_array(&env, [hash.into_val(&env), owner.into_val(&env)]),
+    );
+
+    assert_eq!(result, Err(Ok(FactoryError::Unauthorized)));
+}

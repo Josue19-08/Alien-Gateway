@@ -1767,3 +1767,39 @@ fn test_is_vault_active_returns_none_for_nonexistent_vault() {
         "nonexistent vault must return None"
     );
 }
+
+// ── initialize dedicated unit tests ───────────────────────────────────────────
+
+#[test]
+fn test_initialize_success_stores_registration_contract() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reg_id = env.register(MockRegistrationContract, ());
+    let escrow_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reg_id);
+
+    env.as_contract(&escrow_id, || {
+        let stored: Option<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::RegistrationContract);
+        assert_eq!(stored, Some(reg_id.clone()));
+    });
+}
+
+#[test]
+#[should_panic]
+fn test_initialize_admin_auth_required() {
+    let env = Env::default();
+
+    let reg_id = env.register(MockRegistrationContract, ());
+    let escrow_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reg_id);
+}

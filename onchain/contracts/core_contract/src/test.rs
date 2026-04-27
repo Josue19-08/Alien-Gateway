@@ -1652,3 +1652,71 @@ fn test_get_created_at_unchanged_after_transfer() {
 
     assert_eq!(client.get_created_at(&hash), Some(1_000_000u64));
 }
+
+// ── update_smt_root dedicated unit tests ──────────────────────────────────────
+
+#[test]
+fn test_update_smt_root_admin_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, client) = setup(&env);
+
+    let owner = Address::generate(&env);
+    client.initialize(&owner);
+
+    let root = BytesN::from_array(&env, &[50u8; 32]);
+    client.update_smt_root(&root);
+
+    assert_eq!(client.get_smt_root(), root);
+}
+
+#[test]
+fn test_update_smt_root_stores_correct_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, client) = setup(&env);
+
+    let owner = Address::generate(&env);
+    client.initialize(&owner);
+
+    let root_a = BytesN::from_array(&env, &[52u8; 32]);
+    let root_b = BytesN::from_array(&env, &[53u8; 32]);
+
+    client.update_smt_root(&root_a);
+    assert_eq!(client.get_smt_root(), root_a);
+
+    client.update_smt_root(&root_b);
+    assert_eq!(client.get_smt_root(), root_b);
+}
+
+#[test]
+fn test_update_smt_root_non_admin_rejected() {
+    let env = Env::default();
+    let (contract_id, _) = setup(&env);
+
+    let owner = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let root = BytesN::from_array(&env, &[54u8; 32]);
+
+    env.as_contract(&contract_id, || {
+        crate::storage::set_owner(&env, &owner);
+    });
+
+    env.mock_auths(&[MockAuth {
+        address: &attacker,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "update_smt_root",
+            args: (root.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = env.try_invoke_contract::<(), Error>(
+        &contract_id,
+        &Symbol::new(&env, "update_smt_root"),
+        (root,).into_val(&env),
+    );
+
+    assert!(result.is_err());
+}
