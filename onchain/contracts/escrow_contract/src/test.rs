@@ -1783,10 +1783,7 @@ fn test_initialize_success_stores_registration_contract() {
     client.initialize(&admin, &reg_id);
 
     env.as_contract(&escrow_id, || {
-        let stored: Option<Address> = env
-            .storage()
-            .instance()
-            .get(&DataKey::RegistrationContract);
+        let stored: Option<Address> = env.storage().instance().get(&DataKey::RegistrationContract);
         assert_eq!(stored, Some(reg_id.clone()));
     });
 }
