@@ -1319,6 +1319,42 @@ fn test_initialize_twice_returns_already_initialized() {
     ));
 }
 
+#[test]
+fn test_initialize_success_stores_registration_contract() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let reg_id = env.register(MockRegistrationContract, ());
+    let escrow_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+
+    client.initialize(&admin, &reg_id);
+
+    // After a successful initialize, the registration contract is stored and
+    // can be confirmed by calling create_vault, which requires the registration
+    // contract to be set. Verify indirectly via internal storage inspection.
+    env.as_contract(&escrow_id, || {
+        use crate::storage::read_registration_contract;
+        let stored = read_registration_contract(&env);
+        assert_eq!(stored, Some(reg_id));
+    });
+}
+
+#[test]
+fn test_initialize_requires_admin_auth() {
+    let env = Env::default();
+
+    let reg_id = env.register(MockRegistrationContract, ());
+    let escrow_id = env.register(EscrowContract, ());
+    let client = EscrowContractClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+
+    // No auth mocked — initialize must fail because admin auth is required.
+    let result = client.try_initialize(&admin, &reg_id);
+    assert!(result.is_err());
+}
+
 // ─── get_auto_pay tests ──────────────────────────────────────────────
 
 #[test]

@@ -1652,3 +1652,101 @@ fn test_get_created_at_unchanged_after_transfer() {
 
     assert_eq!(client.get_created_at(&hash), Some(1_000_000u64));
 }
+
+// ============================================================================
+// update_smt_root tests  (Issue #434)
+// ============================================================================
+
+#[test]
+fn test_update_smt_root_admin_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = setup(&env);
+
+    let owner = Address::generate(&env);
+    client.initialize(&owner);
+
+    let new_root = BytesN::from_array(&env, &[42u8; 32]);
+
+    env.mock_auths(&[MockAuth {
+        address: &owner,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "update_smt_root",
+            args: (new_root.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    client.update_smt_root(&new_root);
+
+    assert_eq!(client.get_smt_root(), new_root);
+}
+
+#[test]
+fn test_update_smt_root_non_admin_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = setup(&env);
+
+    let owner = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+    client.initialize(&owner);
+
+    let new_root = BytesN::from_array(&env, &[55u8; 32]);
+
+    env.mock_auths(&[MockAuth {
+        address: &non_admin,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "update_smt_root",
+            args: (new_root.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = env.try_invoke_contract::<(), Error>(
+        &contract_id,
+        &Symbol::new(&env, "update_smt_root"),
+        (new_root,).into_val(&env),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_update_smt_root_stored_value_matches_updated() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = setup(&env);
+
+    let owner = Address::generate(&env);
+    client.initialize(&owner);
+
+    let root_a = BytesN::from_array(&env, &[10u8; 32]);
+    let root_b = BytesN::from_array(&env, &[20u8; 32]);
+
+    env.mock_auths(&[MockAuth {
+        address: &owner,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "update_smt_root",
+            args: (root_a.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.update_smt_root(&root_a);
+    assert_eq!(client.get_smt_root(), root_a);
+
+    env.mock_auths(&[MockAuth {
+        address: &owner,
+        invoke: &MockAuthInvoke {
+            contract: &contract_id,
+            fn_name: "update_smt_root",
+            args: (root_b.clone(),).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.update_smt_root(&root_b);
+    assert_eq!(client.get_smt_root(), root_b);
+}

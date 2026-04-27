@@ -344,3 +344,54 @@ fn contract_getters_follow_soroban_convention() {
     assert_eq!(factory.auction_contract(), Some(auction_contract));
     assert_eq!(factory.core_contract(), Some(core_contract));
 }
+
+// ============================================================================
+// initialize / configure tests  (Issue #433)
+// ============================================================================
+
+#[test]
+fn test_configure_sets_auction_and_core_contracts() {
+    let env = Env::default();
+    let (_, factory, auction_contract, core_contract) = setup_factory(&env);
+
+    assert_eq!(factory.auction_contract(), Some(auction_contract));
+    assert_eq!(factory.core_contract(), Some(core_contract));
+}
+
+#[test]
+fn test_factory_getters_return_none_before_configure() {
+    let env = Env::default();
+    let (_, factory) = setup_unconfigured_factory(&env);
+
+    assert_eq!(factory.auction_contract(), None);
+    assert_eq!(factory.core_contract(), None);
+}
+
+#[test]
+fn test_deploy_username_rejected_for_non_auction_caller() {
+    let env = Env::default();
+    let (factory_id, _factory, auction_contract, _) = setup_factory(&env);
+    let unauthorized = env.register(StubContract, ());
+    let owner = Address::generate(&env);
+    let hash = BytesN::from_array(&env, &[50; 32]);
+    let deploy_args: Vec<Val> = (hash.clone(), owner.clone()).into_val(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &unauthorized,
+        invoke: &MockAuthInvoke {
+            contract: &factory_id,
+            fn_name: "deploy_username",
+            args: deploy_args,
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = env.try_invoke_contract::<(), FactoryError>(
+        &factory_id,
+        &Symbol::new(&env, "deploy_username"),
+        Vec::<Val>::from_array(&env, [hash.into_val(&env), owner.into_val(&env)]),
+    );
+
+    assert!(result.is_err());
+    assert_ne!(unauthorized, auction_contract);
+}
